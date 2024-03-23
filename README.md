@@ -180,3 +180,21 @@ impl Worker {
 }
 ```
 Dengan menambahkan kode di atas, kita membuat struktur ThreadPool yang memiliki kemampuan untuk mengelola kumpulan worker thread. Setiap worker thread di dalam ThreadPool akan menerima tugas-tugas yang dikirimkan melalui saluran (channel) yang dikelola oleh sender. Setiap kali ada tugas baru yang dikirim, worker thread akan mengambil tugas tersebut dari saluran dan mengeksekusinya. Dengan demikian, kita dapat menggunakan ThreadPool ini untuk menangani tugas-tugas secara konkuren, seperti dalam kasus menangani koneksi TCP seperti yang terlihat di dalam method main() di file <code>src/main.rs</code>.
+
+### Commit Bonus Reflection notes
+Method new pada ThreadPool di <code>src/lib.rs</code> kita ubah menjadi build menjadi seperti ini:
+```
+...
+pub fn build(size: usize) -> ThreadPool {
+    assert!(size > 0);
+    let (sender, receiver) = mpsc::channel();
+    let receiver = Arc::new(Mutex::new(receiver));
+    
+    let workers: Vec<Worker> = (0..size)
+        .map(|id| Worker::new(id, Arc::clone(&receiver)))
+        .collect();
+    ThreadPool { workers, sender }
+}
+```
+Dan juga di <code>src/lib.rs</code> jangan lupa untuk mengubahnya menjadi build juga untuk memanggil fungsi yang baru ini. 
+Dalam implementasi ini, method build menggantikan method new. Method ini mengambil ukuran dari thread pool sebagai parameter dan mengembalikan instance ThreadPool baru. Di dalam method build, kita menggunakan fungsi map untuk membuat vektor dari worker thread, mirip dengan yang dilakukan di dalam metode new. Metode execute tetap dan tidak berubah. Hal ini memberikan pemisahan yang lebih clean antara konstruksi dari ThreadPool dan penggunaannya, membuat kode lebih mudah dipahami. Selain itu, hal ini mengikuti prinsip *Single Responsibility Principle*, dengan setiap fungsi memiliki tujuan yang jelas dan spesifik.

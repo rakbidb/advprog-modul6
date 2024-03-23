@@ -112,3 +112,71 @@ fn handle_connection(mut stream: TcpStream) {
 Jadi, jika path yang diterima adalah `/sleep` maka program akan sleep selama 5 detik. Setelah selesai, server melanjutkan untuk menghasilkan respons dengan status line "HTTP/1.1 200 OK" dan melayani file "hello.html" sebagai konten yang ditampilkannya.
 
 Jeda ini menunjukkan bagaimana waktu respons server dapat memengaruhi pengalaman pengguna, terutama dalam skenario di mana beberapa pengguna dapat secara bersamaan mengakses web tersebut. Menjeda respons tentulah tidak bagus karena membuat orang menjadi disuruh untuk menunggu sebelum dapat mengakses kontennya.
+
+### Commit 5 Reflection Notes
+ThreadPool merupakan struktur yang bertanggung jawab untuk mengelola kumpulan thread yang akan mengeksekusi tugas-tugas (jobs) secara concurrency. Pada main.rs, method main diubah menjadi:
+```
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let pool = ThreadPool::new(4);
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
+        pool.execute(|| {
+            handle_connection(stream);
+        });
+    }
+}
+```
+Kita menggunakan ThreadPool dengan ukuran 4 untuk menangani koneksi TCP yang masuk. Setiap koneksi akan ditangani oleh thread yang tersedia di dalam ThreadPool. Selanjutkan agar ThreadPool nya bisa bekerja kita tambahkan ThreadPool di <code>src/lib.rs</code> yang isinya seperti ini
+```
+use std::{
+    sync::{mpsc, Arc, Mutex},
+    thread,
+};
+pub struct ThreadPool {
+    workers: Vec<Worker>,
+    sender: mpsc::Sender<Job>,
+}
+type Job = Box<dyn FnOnce() + Send + 'static>;
+impl ThreadPool {
+    /// Create a new ThreadPool.
+    ///
+    /// The size is the number of threads in the pool.
+    ///
+    /// # Panics
+    ///
+    /// The `new` function will panic if the size is zero.
+    pub fn new(size: usize) -> ThreadPool {
+        assert!(size > 0);
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut workers = Vec::with_capacity(size);
+        for id in 0..size {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+        ThreadPool { workers, sender }
+    }
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(f);
+        self.sender.send(job).unwrap();
+    }
+}
+struct Worker {
+    id: usize,
+    thread: thread::JoinHandle<()>,
+}
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let job = receiver.lock().unwrap().recv().unwrap();
+            println!("Worker {id} got a job; executing.");
+            job();
+        });
+        Worker { id, thread }
+    }
+}
+```
+Dengan menambahkan kode di atas, kita membuat struktur ThreadPool yang memiliki kemampuan untuk mengelola kumpulan worker thread. Setiap worker thread di dalam ThreadPool akan menerima tugas-tugas yang dikirimkan melalui saluran (channel) yang dikelola oleh sender. Setiap kali ada tugas baru yang dikirim, worker thread akan mengambil tugas tersebut dari saluran dan mengeksekusinya. Dengan demikian, kita dapat menggunakan ThreadPool ini untuk menangani tugas-tugas secara konkuren, seperti dalam kasus menangani koneksi TCP seperti yang terlihat di dalam method main() di file <code>src/main.rs</code>.
